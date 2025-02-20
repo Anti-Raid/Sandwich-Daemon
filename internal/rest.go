@@ -505,13 +505,20 @@ func (sg *Sandwich) GatewayEndpoint(ctx *fasthttp.RequestCtx) {
 	gateway.URL = externalAddress
 	gateway.SessionStartLimit.Remaining = 1000 // Sandwich doesnt have a rate limit
 
-	if mg.Configuration.Rest.GetGatewayBot.MaxConcurrency > 0 {
-		gateway.SessionStartLimit.MaxConcurrency = mg.Configuration.Rest.GetGatewayBot.MaxConcurrency
-	} else {
-		gateway.SessionStartLimit.MaxConcurrency = int32(mg.ConsumerShardCount()/2) + 1 // Default: To ensure we dont get hammered, only allow half the shards (rounded up)
-	}
+	guildIds := string(ctx.URI().QueryArgs().Peek("guild_ids"))
 
-	gateway.Shards = mg.ConsumerShardCount()
+	if guildIds != "" {
+		gateway.Shards = 1 // Only 1 shard is allowed for guilds
+		gateway.SessionStartLimit.MaxConcurrency = 1
+		gateway.URL += "?guild_ids=" + guildIds
+	} else {
+		if mg.Configuration.Rest.GetGatewayBot.MaxConcurrency > 0 {
+			gateway.SessionStartLimit.MaxConcurrency = mg.Configuration.Rest.GetGatewayBot.MaxConcurrency
+		} else {
+			gateway.SessionStartLimit.MaxConcurrency = int32(mg.ConsumerShardCount()/2) + 1 // Default: To ensure we dont get hammered, only allow half the shards (rounded up)
+		}
+		gateway.Shards = mg.ConsumerShardCount()
+	}
 
 	// Write raw, as discord libraries dont support sandwich_structs.BaseRestResponse
 	writeResponse(ctx, fasthttp.StatusOK, gateway)

@@ -99,6 +99,7 @@ type subscriber struct {
 	writeCloseMessage chan closeMessage            // Close message channel
 	writeHeartbeat    chan void
 	sessionId         string
+	guildIds          []discord.GuildID // The specific guild ids to dispatch events to, if empty, dispatch all
 	shard             [2]int32
 	seq               int32
 	meta              subscriberStatusMeta
@@ -182,17 +183,28 @@ func (s *subscriber) dispatchInitial() error {
 
 	unavailableGuilds := make([]discord.UnavailableGuild, 0)
 
-	s.cs.manager.Sandwich.State.Guilds.Range(func(id discord.GuildID, _ discord.Guild) bool {
-		shardId := int32(s.cs.manager.GetShardIdOfGuild(id, s.cs.manager.ConsumerShardCount()))
-		guildIdShardIdMap[id] = shardId // We need this when dispatching guilds
-		if shardId == s.shard[0] {
+	if len(s.guildIds) > 0 {
+		// Only dispatch the guilds that are in the guildIds in READY event
+		for _, id := range s.guildIds {
+			// When using a static guild list, there is only one shard
 			unavailableGuilds = append(unavailableGuilds, discord.UnavailableGuild{
 				ID:          id,
 				Unavailable: false,
 			})
 		}
-		return false
-	})
+	} else {
+		s.cs.manager.Sandwich.State.Guilds.Range(func(id discord.GuildID, _ discord.Guild) bool {
+			shardId := int32(s.cs.manager.GetShardIdOfGuild(id, s.cs.manager.ConsumerShardCount()))
+			guildIdShardIdMap[id] = shardId // We need this when dispatching guilds
+			if shardId == s.shard[0] {
+				unavailableGuilds = append(unavailableGuilds, discord.UnavailableGuild{
+					ID:          id,
+					Unavailable: false,
+				})
+			}
+			return false
+		})
+	}
 
 	// First send READY event with our initial state
 	readyPayload := map[string]any{
@@ -230,45 +242,77 @@ func (s *subscriber) dispatchInitial() error {
 	}
 
 	// Next dispatch guilds
-	s.cs.manager.Sandwich.State.Guilds.Range(func(id discord.GuildID, _ discord.Guild) bool {
-		shardId, ok := guildIdShardIdMap[id]
+	if len(s.guildIds) > 0 {
+		for _, id := range s.guildIds {
+			// Only one shard, so this is simple
+			guild, ok := s.cs.manager.Sandwich.State.GetGuild(id)
 
-		if !ok {
-			// Get shard id
-			shardId = int32(s.cs.manager.GetShardIdOfGuild(id, s.cs.manager.ConsumerShardCount()))
+			if !ok {
+				s.cs.manager.Logger.Error().Msgf("[WS] Failed to get guild: %d", id)
+				continue
+			}
+
+			serializedGuild, err := sandwichjson.Marshal(guild)
+
+			if err != nil {
+				s.cs.manager.Logger.Error().Msgf("[WS] Failed to marshal guild: %s [shard %d]", err.Error(), s.shard[0])
+				continue
+			}
+
+			s.writeNormal <- structs.SandwichPayload{
+				Op:   discord.GatewayOpDispatch,
+				Data: serializedGuild,
+				Type: "GUILD_CREATE",
+			}
+
+			select {
+			case <-s.context.Done():
+				return nil
+			default:
+				continue
+			}
 		}
+	} else {
+		s.cs.manager.Sandwich.State.Guilds.Range(func(id discord.GuildID, _ discord.Guild) bool {
+			shardId, ok := guildIdShardIdMap[id]
 
-		if shardId != s.shard[0] {
-			return false // Skip to next guild if the shard id is not the same
-		}
+			if !ok {
+				// Get shard id
+				shardId = int32(s.cs.manager.GetShardIdOfGuild(id, s.cs.manager.ConsumerShardCount()))
+			}
 
-		guild, ok := s.cs.manager.Sandwich.State.GetGuild(id)
+			if shardId != s.shard[0] {
+				return false // Skip to next guild if the shard id is not the same
+			}
 
-		if !ok {
-			s.cs.manager.Logger.Error().Msgf("[WS] Failed to get guild: %d", id)
-			return false
-		}
+			guild, ok := s.cs.manager.Sandwich.State.GetGuild(id)
 
-		serializedGuild, err := sandwichjson.Marshal(guild)
+			if !ok {
+				s.cs.manager.Logger.Error().Msgf("[WS] Failed to get guild: %d", id)
+				return false
+			}
 
-		if err != nil {
-			s.cs.manager.Logger.Error().Msgf("[WS] Failed to marshal guild: %s [shard %d]", err.Error(), s.shard[0])
-			return false
-		}
+			serializedGuild, err := sandwichjson.Marshal(guild)
 
-		s.writeNormal <- structs.SandwichPayload{
-			Op:   discord.GatewayOpDispatch,
-			Data: serializedGuild,
-			Type: "GUILD_CREATE",
-		}
+			if err != nil {
+				s.cs.manager.Logger.Error().Msgf("[WS] Failed to marshal guild: %s [shard %d]", err.Error(), s.shard[0])
+				return false
+			}
 
-		select {
-		case <-s.context.Done():
-			return true
-		default:
-			return false
-		}
-	})
+			s.writeNormal <- structs.SandwichPayload{
+				Op:   discord.GatewayOpDispatch,
+				Data: serializedGuild,
+				Type: "GUILD_CREATE",
+			}
+
+			select {
+			case <-s.context.Done():
+				return true
+			default:
+				return false
+			}
+		})
+	}
 
 	s.cs.manager.Logger.Info().Msgf("[WS] Shard %d (initial state dispatched successfully)", s.shard[0])
 
@@ -368,23 +412,41 @@ func (s *subscriber) identifyClient() (oldSess *subscriber, err error) {
 
 				s.sessionId = randomHex(12)
 
-				csc := s.cs.manager.ConsumerShardCount() // Get the consumer shard count to avoid unneeded casts
+				if len(s.guildIds) > 0 {
+					// Only 1 shard is allowed if an explicit guild list is provided
 
-				// dpy workaround
-				if identify.Shard[1] == 0 {
-					identify.Shard[1] = csc
+					// dpy workaround
+					if identify.Shard[1] == 0 {
+						identify.Shard[1] = 1
+					}
+
+					if identify.Shard[1] != 1 || identify.Shard[0] != 0 {
+						return nil, errors.New("invalid shard count: 1 != " + strconv.Itoa(int(identify.Shard[1])) + " or 0 != " + strconv.Itoa(int(identify.Shard[0])))
+					}
+
+					s.shard = [2]int32{0, 1}
+
+					s.cs.manager.Logger.Info().Msgf("[WS] Shard %d is now identified with created session id %s [%s] with explicit guild_list [%s]", s.shard[0], s.sessionId, fmt.Sprint(s.shard), fmt.Sprint(s.guildIds))
+					return nil, nil
+				} else {
+					csc := s.cs.manager.ConsumerShardCount() // Get the consumer shard count to avoid unneeded casts
+
+					// dpy workaround
+					if identify.Shard[1] == 0 {
+						identify.Shard[1] = csc
+					}
+
+					if identify.Shard[1] > csc {
+						return nil, fmt.Errorf("invalid shard count: %d > %d", identify.Shard[1], csc)
+					} else if identify.Shard[0] > csc {
+						return nil, fmt.Errorf("invalid shard id: %d > %d", identify.Shard[0], csc)
+					}
+
+					s.shard = identify.Shard
+
+					s.cs.manager.Logger.Info().Msgf("[WS] Shard %d is now identified with created session id %s [%s]", s.shard[0], s.sessionId, fmt.Sprint(s.shard))
+					return nil, nil
 				}
-
-				if identify.Shard[1] > csc {
-					return nil, fmt.Errorf("invalid shard count: %d > %d", identify.Shard[1], csc)
-				} else if identify.Shard[0] > csc {
-					return nil, fmt.Errorf("invalid shard id: %d > %d", identify.Shard[0], csc)
-				}
-
-				s.shard = identify.Shard
-
-				s.cs.manager.Logger.Info().Msgf("[WS] Shard %d is now identified with created session id %s [%s]", s.shard[0], s.sessionId, fmt.Sprint(s.shard))
-				return nil, nil
 			} else if packet.Op == discord.GatewayOpResume {
 				var resume struct {
 					Token     string `json:"token"`
@@ -408,6 +470,7 @@ func (s *subscriber) identifyClient() (oldSess *subscriber, err error) {
 								s.cs.manager.Logger.Info().Msgf("[WS] Shard %d is now identified with resumed session id %s [%s]", s.shard[0], s.sessionId, fmt.Sprint(s.shard))
 								s.seq = resume.Seq
 								s.shard = oldSess.shard
+								s.guildIds = oldSess.guildIds
 								s.cs.subscribersMu.RUnlock()
 								return oldSess, nil
 							}
@@ -542,6 +605,21 @@ func (s *subscriber) handleReadMessages() {
 					continue
 				}
 
+				if len(s.guildIds) > 0 {
+					var found bool
+					for _, id := range s.guildIds {
+						if id == guildId.GuildID {
+							found = true
+							break
+						}
+					}
+
+					if !found {
+						s.cs.manager.Logger.Info().Msgf("Guild id %d not found in guild_ids %v", guildId.GuildID, s.guildIds)
+						continue
+					}
+				}
+
 				shardId = int32(s.cs.manager.GetShardIdOfGuild(guildId.GuildID, s.cs.manager.noShards))
 				s.cs.manager.Logger.Info().Msgf("Remapped shard id %d to %d", s.shard[0], shardId)
 			}
@@ -651,6 +729,27 @@ func (cs *chatServer) subscribe(ctx context.Context, w http.ResponseWriter, r *h
 		return errors.New("manager is not yet ready to accept connections")
 	}
 
+	var guildIds []discord.GuildID
+	if r.URL.Query().Get("guild_ids") == "" {
+		guildIds = []discord.GuildID{}
+	} else {
+		// Remove any trailing query params
+		gidsStr := r.URL.Query().Get("guild_ids")
+		gidsStr = strings.Split(gidsStr, "?")[0]
+		split := strings.Split(gidsStr, ",")
+
+		for _, id := range split {
+			guildId, err := strconv.ParseUint(id, 10, 64)
+
+			if err != nil {
+				http.Error(w, fmt.Sprintf("{\"error\":\"Invalid guild_ids\",\"id\":%d,\"err\":\"%s\",\"failing\":\"%s\"}", guildId, err, gidsStr), http.StatusBadRequest)
+				return errors.New("invalid guild_ids")
+			}
+
+			guildIds = append(guildIds, discord.GuildID(guildId))
+		}
+	}
+
 	cs.manager.Logger.Info().Str("url", r.URL.String()).Msgf("[WS] Shard %d is now subscribing", 0)
 
 	var c *websocket.Conn
@@ -662,6 +761,7 @@ func (cs *chatServer) subscribe(ctx context.Context, w http.ResponseWriter, r *h
 		writeBytes:        make(chan []byte, cs.subscriberMessageBuffer),
 		writeHeartbeat:    make(chan void, cs.subscriberMessageBuffer),
 		meta:              newSubscriberStatusMeta(),
+		guildIds:          guildIds,
 	}
 
 	// Create cancellable ctx
@@ -796,9 +896,26 @@ func (cs *chatServer) publish(shard [2]int32, msg *structs.SandwichPayload) {
 		}
 
 		for _, s := range sub {
+			if len(s.guildIds) > 0 {
+				continue // Handled below
+			}
 			cs.manager.Logger.Trace().Msgf("[WS] Shard %d is now publishing message to %d subscribers", shard[0], len(sub))
 
 			s.writeNormal <- *msg
+		}
+	}
+
+	// Special case: len(guild_ids) > 0
+	if msg.EventDispatchIdentifier.GuildID != nil {
+		for _, sub := range cs.subscribers[[2]int32{0, 1}] {
+			if len(sub.guildIds) > 0 {
+				for _, id := range sub.guildIds {
+					if id == *msg.EventDispatchIdentifier.GuildID {
+						sub.writeNormal <- *msg
+						break
+					}
+				}
+			}
 		}
 	}
 }

@@ -10,14 +10,14 @@ import (
 )
 
 const (
-	MaxInt64        = 9007199254740991
+	MaxInt64        = 18446744073709551615
 	DiscordCreation = 1420070400000
 )
 
 var null = []byte("null")
 
 // Placeholder type for easy identification.
-type Snowflake int64
+type Snowflake uint64
 
 func (s *Snowflake) IsNil() bool {
 	return *s == 0
