@@ -18,6 +18,7 @@ type StatusEndpointResponse struct {
 type StatusEndpointManager struct {
 	DisplayName string                     `json:"display_name"`
 	ShardGroups []StatusEndpointShardGroup `json:"shard_groups"`
+	UserCount   int                        `json:"user_count"`
 }
 
 type StatusEndpointShardGroup struct {

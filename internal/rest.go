@@ -380,6 +380,7 @@ func (sg *Sandwich) StatusEndpoint(ctx *fasthttp.RequestCtx) {
 	unsortedManagers := make(map[string]sandwich_structs.StatusEndpointManager)
 
 	manager := gotils_strconv.B2S(ctx.QueryArgs().Peek("manager"))
+	userCount := sg.State.Users.Count()
 
 	if manager == "" {
 		statusData := sg.statusCache.Result(StatusCacheDuration, func() interface{} {
@@ -392,6 +393,7 @@ func (sg *Sandwich) StatusEndpoint(ctx *fasthttp.RequestCtx) {
 				unsortedManagers[keyName] = sandwich_structs.StatusEndpointManager{
 					DisplayName: friendlyName,
 					ShardGroups: getManagerShardGroupStatus(manager),
+					UserCount:   userCount,
 				}
 
 				return false
@@ -441,6 +443,7 @@ func (sg *Sandwich) StatusEndpoint(ctx *fasthttp.RequestCtx) {
 			Data: &sandwich_structs.StatusEndpointManager{
 				DisplayName: friendlyName,
 				ShardGroups: getManagerShardGroupStatus(manager),
+				UserCount:   userCount,
 			},
 		})
 	}
