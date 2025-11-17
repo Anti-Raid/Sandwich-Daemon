@@ -19,6 +19,7 @@ type StatusEndpointManager struct {
 	DisplayName string                     `json:"display_name"`
 	ShardGroups []StatusEndpointShardGroup `json:"shard_groups"`
 	UserCount   int                        `json:"user_count"`
+	MemberCount int                        `json:"member_count"`
 }
 
 type StatusEndpointShardGroup struct {

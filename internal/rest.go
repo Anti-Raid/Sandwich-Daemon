@@ -381,6 +381,7 @@ func (sg *Sandwich) StatusEndpoint(ctx *fasthttp.RequestCtx) {
 
 	manager := gotils_strconv.B2S(ctx.QueryArgs().Peek("manager"))
 	userCount := sg.State.Users.Count()
+	memberCount := sg.LastKnownTotalMembers
 
 	if manager == "" {
 		statusData := sg.statusCache.Result(StatusCacheDuration, func() interface{} {
@@ -394,6 +395,7 @@ func (sg *Sandwich) StatusEndpoint(ctx *fasthttp.RequestCtx) {
 					DisplayName: friendlyName,
 					ShardGroups: getManagerShardGroupStatus(manager),
 					UserCount:   userCount,
+					MemberCount: memberCount,
 				}
 
 				return false
@@ -444,6 +446,7 @@ func (sg *Sandwich) StatusEndpoint(ctx *fasthttp.RequestCtx) {
 				DisplayName: friendlyName,
 				ShardGroups: getManagerShardGroupStatus(manager),
 				UserCount:   userCount,
+				MemberCount: memberCount,
 			},
 		})
 	}
@@ -705,7 +708,7 @@ func (sg *Sandwich) StateEndpoint(ctx *fasthttp.RequestCtx) {
 				Ok:   true,
 				Data: roles,
 			})
-		} 
+		}
 	case "channels":
 		idInt64, err := strconv.ParseInt(gotils_strconv.B2S(id), 10, 64)
 
