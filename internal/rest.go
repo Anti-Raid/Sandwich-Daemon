@@ -61,7 +61,6 @@ func (sg *Sandwich) NewRestRouter() (routerHandler fasthttp.RequestHandler, fsHa
 	// Anonymous routes
 	r.GET("/api/status", sg.StatusEndpoint)
 	r.GET("/api/user", sg.UserEndpoint)
-	r.GET("/api/totalusers", sg.TotalUsersEndpoint)
 
 	// State routes
 	r.GET("/{manager}/api/state", sg.internalEndpoint(sg.StateEndpoint))
@@ -1064,13 +1063,6 @@ func (sg *Sandwich) UserEndpoint(ctx *fasthttp.RequestCtx) {
 			IsAuthenticated: isAuthenticated,
 		},
 	})
-}
-
-func (sg *Sandwich) TotalUsersEndpoint(ctx *fasthttp.RequestCtx) {
-        writeResponse(ctx, fasthttp.StatusOK, sandwich_structs.BaseRestResponse{
-                Ok: true,
-                Data: sg.LastKnownTotalMembers,
-        })
 }
 
 func (sg *Sandwich) SandwichGetEndpoint(ctx *fasthttp.RequestCtx) {
