@@ -94,6 +94,8 @@ type Sandwich struct {
 
 	ConfigurationLocation string `json:"configuration_location"`
 
+	LastKnownTotalMembers int `json:"-"`
+
 	Options SandwichOptions `json:"options" yaml:"options"`
 
 	Configuration SandwichConfiguration `json:"configuration" yaml:"configuration"`
@@ -532,6 +534,8 @@ func (sg *Sandwich) prometheusGatherer() {
 			stateGuilds++
 			return false
 		})
+
+		sg.LastKnownTotalMembers = stateTotalMemberCount
 
 		stateMembers := 0
 		stateRoles := 0

@@ -287,6 +287,9 @@ func (ss *SandwichState) GetGuildRole(guildID discord.GuildID, roleID discord.Ro
 
 // SetGuildRole creates or updates a role entry in the cache.
 func (ss *SandwichState) SetGuildRole(guildID discord.GuildID, role discord.Role) {
+	if role.ID == 0 {
+		panic("roleID cannot be '0'")
+	}
 	ss.GuildRoles.Store(guildID, role.ID, role)
 }
 

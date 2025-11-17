@@ -61,6 +61,7 @@ func (sg *Sandwich) NewRestRouter() (routerHandler fasthttp.RequestHandler, fsHa
 	// Anonymous routes
 	r.GET("/api/status", sg.StatusEndpoint)
 	r.GET("/api/user", sg.UserEndpoint)
+	r.GET("/api/totalusers", sg.TotalUsersEndpoint)
 
 	// State routes
 	r.GET("/{manager}/api/state", sg.internalEndpoint(sg.StateEndpoint))
@@ -705,26 +706,7 @@ func (sg *Sandwich) StateEndpoint(ctx *fasthttp.RequestCtx) {
 				Ok:   true,
 				Data: roles,
 			})
-		} else {
-			// Read request body as a user
-			var role discord.Role
-
-			err := sandwichjson.Unmarshal(ctx.PostBody(), &role)
-
-			if err != nil {
-				writeResponse(ctx, fasthttp.StatusBadRequest, sandwich_structs.BaseRestResponse{
-					Ok:    false,
-					Error: err.Error(),
-				})
-
-				return
-			}
-
-			sg.Logger.Info().Any("role", role).Any("guildId", idInt64).Msg("Setting guild channels")
-
-			snowflake := discord.GuildID(idInt64)
-			sg.State.SetGuildRole(snowflake, role)
-		}
+		} 
 	case "channels":
 		idInt64, err := strconv.ParseInt(gotils_strconv.B2S(id), 10, 64)
 
@@ -1082,6 +1064,13 @@ func (sg *Sandwich) UserEndpoint(ctx *fasthttp.RequestCtx) {
 			IsAuthenticated: isAuthenticated,
 		},
 	})
+}
+
+func (sg *Sandwich) TotalUsersEndpoint(ctx *fasthttp.RequestCtx) {
+        writeResponse(ctx, fasthttp.StatusOK, sandwich_structs.BaseRestResponse{
+                Ok: true,
+                Data: sg.LastKnownTotalMembers,
+        })
 }
 
 func (sg *Sandwich) SandwichGetEndpoint(ctx *fasthttp.RequestCtx) {

@@ -786,14 +786,14 @@ func OnGuildRoleCreate(ctx StateCtx, msg discord.GatewayPayload, trace sandwich_
 		return result, false, err
 	}
 
-	defer ctx.OnGuildDispatchEvent(msg.Type, *guildRoleCreatePayload.GuildID)
+	defer ctx.OnGuildDispatchEvent(msg.Type, guildRoleCreatePayload.GuildID)
 
-	ctx.Sandwich.State.SetGuildRole(*guildRoleCreatePayload.GuildID, discord.Role(guildRoleCreatePayload))
+	ctx.Sandwich.State.SetGuildRole(guildRoleCreatePayload.GuildID, guildRoleCreatePayload.Role)
 
 	return EventDispatch{
 		Data: msg.Data,
 		EventDispatchIdentifier: &sandwich_structs.EventDispatchIdentifier{
-			GuildID: guildRoleCreatePayload.GuildID,
+			GuildID: &guildRoleCreatePayload.GuildID,
 		},
 	}, true, nil
 }

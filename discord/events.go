@@ -148,7 +148,10 @@ type GuildMembersChunk struct {
 }
 
 // GuildRoleCreate represents a guild role create event.
-type GuildRoleCreate Role
+type GuildRoleCreate struct {
+        Role    Role    `json:"role"`
+        GuildID GuildID `json:"guild_id"`
+}
 
 // GuildRoleUpdate represents a guild role update event.
 type GuildRoleUpdate struct {
